@@ -149,11 +149,14 @@
 <body>
     <header>
         <h1>📁 simpleSFTP</h1>
+        <span id="user-info" style="color:#aaa; font-size:0.8rem;"></span>
+        <button onclick="logout()" style="width:auto; padding:6px 12px; font-size:0.8rem;">Logout</button>
         <form id="connection-form">
             <input type="text" id="host" placeholder="Host" required>
             <input type="number" id="port" placeholder="22" value="22" style="width:60px">
             <input type="text" id="username" placeholder="Username" required>
-            <input type="password" id="password" placeholder="Password">
+            <input type="password" id="password" placeholder="Password (or leave blank for key)">
+            <input type="text" id="keyfile" placeholder="Key file path (optional)" style="width:180px">
             <button type="submit" id="connect-btn">Connect</button>
             <button type="button" id="disconnect-btn" class="hidden">Disconnect</button>
         </form>
@@ -220,9 +223,22 @@
         let connected = false;
 
         // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Check auth
+            const res = await fetch('/auth/status');
+            const auth = await res.json();
+            if (!auth.authenticated) {
+                window.location = '/login';
+                return;
+            }
+            document.getElementById('user-info').textContent = auth.username;
             loadLocalList('/');
         });
+
+        async function logout() {
+            await fetch('/logout', {method: 'POST'});
+            window.location = '/login';
+        }
 
         // Connection
         document.getElementById('connection-form').addEventListener('submit', async (e) => {
@@ -238,7 +254,8 @@
                     host: document.getElementById('host').value,
                     port: parseInt(document.getElementById('port').value),
                     username: document.getElementById('username').value,
-                    password: document.getElementById('password').value
+                    password: document.getElementById('password').value,
+                    key_filename: document.getElementById('keyfile').value || undefined
                 })
             });
             const data = await res.json();

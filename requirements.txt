@@ -1,2 +1,4 @@
+flask-bcrypt>=1.0.1
+cryptography>=41.0.0
 paramiko>=3.4.0
 Flask>=3.0.0
