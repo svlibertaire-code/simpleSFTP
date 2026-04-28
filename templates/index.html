@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>simpleSFTP</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: #16213e;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0f3460;
+        }
+        header h1 { font-size: 1.2rem; color: #e94560; }
+        #connection-form {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        input, button {
+            padding: 6px 10px;
+            border-radius: 4px;
+            border: 1px solid #0f3460;
+            background: #0f3460;
+            color: #eee;
+            font-size: 0.85rem;
+        }
+        input:focus { outline: none; border-color: #e94560; }
+        button {
+            background: #e94560;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover { background: #ff6b6b; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #status { font-size: 0.8rem; color: #aaa; }
+        main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        .pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #0f3460;
+            overflow: hidden;
+        }
+        .pane:last-child { border-right: none; }
+        .pane-header {
+            background: #16213e;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0f3460;
+        }
+        .pane-title { font-weight: 600; font-size: 0.9rem; }
+        .breadcrumb {
+            font-size: 0.8rem;
+            color: #aaa;
+            word-break: break-all;
+        }
+        .file-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 5px 0;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 15px;
+            cursor: pointer;
+            gap: 10px;
+            transition: background 0.1s;
+        }
+        .file-item:hover { background: #0f3460; }
+        .file-item.selected { background: #e94560; }
+        .file-icon { width: 20px; text-align: center; font-size: 1.1rem; }
+        .file-name { flex: 1; font-size: 0.85rem; }
+        .file-size { font-size: 0.75rem; color: #aaa; width: 70px; text-align: right; }
+        .file-date { font-size: 0.75rem; color: #888; width: 130px; text-align: right; }
+        .actions {
+            padding: 10px 15px;
+            background: #16213e;
+            border-top: 1px solid #0f3460;
+            display: flex;
+            gap: 8px;
+        }
+        .actions button { font-size: 0.8rem; padding: 5px 12px; }
+        .hidden { display: none !important; }
+        #drop-zone {
+            border: 2px dashed #0f3460;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            color: #888;
+            margin: 10px;
+            display: none;
+        }
+        #drop-zone.active { border-color: #e94560; color: #eee; background: #0f346022; }
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 8px;
+            min-width: 300px;
+            max-width: 90vw;
+        }
+        .modal h3 { margin-bottom: 15px; }
+        .modal input { width: 100%; margin-bottom: 10px; }
+        .modal-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+        .progress-bar {
+            height: 4px;
+            background: #0f3460;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: #e94560;
+            width: 0%;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📁 simpleSFTP</h1>
+        <form id="connection-form">
+            <input type="text" id="host" placeholder="Host" required>
+            <input type="number" id="port" placeholder="22" value="22" style="width:60px">
+            <input type="text" id="username" placeholder="Username" required>
+            <input type="password" id="password" placeholder="Password">
+            <button type="submit" id="connect-btn">Connect</button>
+            <button type="button" id="disconnect-btn" class="hidden">Disconnect</button>
+        </form>
+        <span id="status">Disconnected</span>
+    </header>
+
+    <main>
+        <!-- Local Pane -->
+        <div class="pane" id="local-pane">
+            <div class="pane-header">
+                <span class="pane-title">💻 Local</span>
+                <span class="breadcrumb" id="local-path">/</span>
+            </div>
+            <div class="file-list" id="local-list"></div>
+            <div class="actions">
+                <button onclick="localUp()">⬆ Up</button>
+                <button onclick="showMkdir('local')">📁 New Folder</button>
+                <button onclick="triggerLocalUpload()">⬆ Upload</button>
+                <button onclick="downloadSelectedLocal()">⬇ Download</button>
+                <button onclick="deleteSelected('local')">🗑 Delete</button>
+            </div>
+        </div>
+
+        <!-- Remote Pane -->
+        <div class="pane" id="remote-pane">
+            <div class="pane-header">
+                <span class="pane-title">🌐 Remote (SFTP)</span>
+                <span class="breadcrumb" id="remote-path">Not connected</span>
+            </div>
+            <div class="file-list" id="remote-list"></div>
+            <div class="actions">
+                <button onclick="remoteUp()">⬆ Up</button>
+                <button onclick="showMkdir('remote')">📁 New Folder</button>
+                <button onclick="transferToLocal()">⬅ To Local</button>
+                <button onclick="transferToRemote()">➡ To Remote</button>
+                <button onclick="deleteSelected('remote')">🗑 Delete</button>
+            </div>
+        </div>
+    </main>
+
+    <div id="drop-zone">Drop files here to upload</div>
+
+    <!-- New Folder Modal -->
+    <div class="modal-overlay" id="mkdir-modal">
+        <div class="modal">
+            <h3>Create New Folder</h3>
+            <input type="text" id="mkdir-name" placeholder="folder_name">
+            <div class="modal-buttons">
+                <button onclick="closeModal()">Cancel</button>
+                <button onclick="doMkdir()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <input type="file" id="local-file-input" class="hidden" multiple onchange="handleLocalUpload(event)">
+
+    <script>
+        // State
+        let localPath = '/';
+        let remotePath = '/';
+        let selectedLocal = null;
+        let selectedRemote = null;
+        let mkdirTarget = null;
+        let connected = false;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadLocalList('/');
+        });
+
+        // Connection
+        document.getElementById('connection-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('connect-btn');
+            btn.disabled = true;
+            btn.textContent = 'Connecting...';
+
+            const res = await fetch('/connect', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    host: document.getElementById('host').value,
+                    port: parseInt(document.getElementById('port').value),
+                    username: document.getElementById('username').value,
+                    password: document.getElementById('password').value
+                })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                connected = true;
+                document.getElementById('status').textContent = `Connected to ${data.message.split(' ')[2]}`;
+                document.getElementById('connect-btn').classList.add('hidden');
+                document.getElementById('disconnect-btn').classList.remove('hidden');
+                loadRemoteList('/');
+            } else {
+                alert('Connection failed: ' + (data.error || 'Unknown error'));
+            }
+            btn.disabled = false;
+            btn.textContent = 'Connect';
+        });
+
+        document.getElementById('disconnect-btn').addEventListener('click', async () => {
+            await fetch('/disconnect', {method: 'POST'});
+            connected = false;
+            document.getElementById('status').textContent = 'Disconnected';
+            document.getElementById('connect-btn').classList.remove('hidden');
+            document.getElementById('disconnect-btn').classList.add('hidden');
+            document.getElementById('remote-list').innerHTML = '';
+            document.getElementById('remote-path').textContent = 'Not connected';
+        });
+
+        // Local file listing
+        async function loadLocalList(path) {
+            const res = await fetch('/local/list', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path})
+            });
+            const data = await res.json();
+            if (!data.success) { alert(data.error); return; }
+            localPath = data.path;
+            document.getElementById('local-path').textContent = localPath;
+            renderFileList('local-list', data.files, 'local');
+        }
+
+        // Remote file listing
+        async function loadRemoteList(path) {
+            if (!connected) return;
+            const res = await fetch('/remote/list', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path})
+            });
+            const data = await res.json();
+            if (!data.success) { alert(data.error); return; }
+            remotePath = data.path;
+            document.getElementById('remote-path').textContent = remotePath;
+            renderFileList('remote-list', data.files, 'remote');
+        }
+
+        function renderFileList(elementId, files, type) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = '';
+            files.forEach(f => {
+                const div = document.createElement('div');
+                div.className = 'file-item';
+                div.dataset.name = f.name;
+                div.dataset.isDir = f.is_dir;
+                const icon = f.is_dir ? '📁' : '📄';
+                const size = f.is_dir ? '--' : formatSize(f.size);
+                const date = f.mtime ? new Date(f.mtime * 1000).toLocaleString() : '';
+                div.innerHTML = `
+                    <span class="file-icon">${icon}</span>
+                    <span class="file-name">${escapeHtml(f.name)}</span>
+                    <span class="file-size">${size}</span>
+                    <span class="file-date">${date}</span>
+                `;
+                div.addEventListener('click', () => selectFile(type, div, f));
+                div.addEventListener('dblclick', () => {
+                    if (f.is_dir) {
+                        const path = type === 'local' ? joinPath(localPath, f.name) : joinPath(remotePath, f.name);
+                        type === 'local' ? loadLocalList(path) : loadRemoteList(path);
+                    }
+                });
+                container.appendChild(div);
+            });
+        }
+
+        function selectFile(type, element, file) {
+            // Clear previous selection
+            document.querySelectorAll(`#${type}-list .file-item`).forEach(el => el.classList.remove('selected'));
+            element.classList.add('selected');
+            if (type === 'local') selectedLocal = {name: file.name, isDir: file.is_dir};
+            else selectedRemote = {name: file.name, isDir: file.is_dir};
+        }
+
+        function localUp() {
+            const parent = localPath.split('/').slice(0, -1).join('/') || '/';
+            loadLocalList(parent);
+        }
+
+        function remoteUp() {
+            if (!connected) return;
+            const parent = remotePath.split('/').slice(0, -1).join('/') || '/';
+            loadRemoteList(parent);
+        }
+
+        // Transfers
+        async function transferToLocal() {
+            if (!selectedRemote || selectedRemote.isDir) { alert('Select a remote file (not folder)'); return; }
+            const remoteFile = joinPath(remotePath, selectedRemote.name);
+            const localFile = joinPath(localPath, selectedRemote.name);
+            const res = await fetch('/remote/download', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({remote_path: remoteFile, local_path: localFile})
+            });
+            const data = await res.json();
+            if (data.success) { loadLocalList(localPath); alert('Downloaded!'); }
+            else alert('Error: ' + data.error);
+        }
+
+        async function transferToRemote() {
+            if (!selectedLocal || selectedLocal.isDir) { alert('Select a local file (not folder)'); return; }
+            const localFile = joinPath(localPath, selectedLocal.name);
+            const remoteFile = joinPath(remotePath, selectedLocal.name);
+            const res = await fetch('/remote/upload', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({local_path: localFile, remote_path: remoteFile})
+            });
+            const data = await res.json();
+            if (data.success) { loadRemoteList(remotePath); alert('Uploaded!'); }
+            else alert('Error: ' + data.error);
+        }
+
+        async function deleteSelected(type) {
+            const selected = type === 'local' ? selectedLocal : selectedRemote;
+            if (!selected) { alert('Select a file first'); return; }
+            if (!confirm(`Delete ${selected.name}?`)) return;
+
+            if (type === 'local') {
+                // Local delete via fetch (not implemented in backend yet, add if needed)
+                alert('Local delete not yet implemented in this scaffold');
+            } else {
+                const remoteFile = joinPath(remotePath, selected.name);
+                const res = await fetch('/remote/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({remote_path: remoteFile, is_dir: selected.isDir})
+                });
+                const data = await res.json();
+                if (data.success) { loadRemoteList(remotePath); }
+                else alert('Error: ' + data.error);
+            }
+        }
+
+        // Mkdir
+        function showMkdir(target) {
+            mkdirTarget = target;
+            document.getElementById('mkdir-modal').classList.add('active');
+            document.getElementById('mkdir-name').focus();
+        }
+        function closeModal() {
+            document.getElementById('mkdir-modal').classList.remove('active');
+            document.getElementById('mkdir-name').value = '';
+        }
+        async function doMkdir() {
+            const name = document.getElementById('mkdir-name').value;
+            if (!name) return;
+            if (mkdirTarget === 'remote') {
+                const path = joinPath(remotePath, name);
+                const res = await fetch('/remote/mkdir', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({remote_path: path})
+                });
+                const data = await res.json();
+                if (data.success) loadRemoteList(remotePath);
+                else alert(data.error);
+            } else {
+                const path = joinPath(localPath, name);
+                // Local mkdir not implemented in backend yet
+                alert('Local mkdir not yet implemented');
+            }
+            closeModal();
+        }
+
+        // Local upload/download helpers
+        function triggerLocalUpload() {
+            document.getElementById('local-file-input').click();
+        }
+        async function handleLocalUpload(e) {
+            const files = e.target.files;
+            for (let file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('path', localPath);
+                await fetch('/local/upload', {method: 'POST', body: formData});
+            }
+            loadLocalList(localPath);
+        }
+        function downloadSelectedLocal() {
+            if (!selectedLocal || selectedLocal.isDir) { alert('Select a file'); return; }
+            const path = joinPath(localPath, selectedLocal.name);
+            window.location = `/local/download?path=${encodeURIComponent(path)}`;
+        }
+
+        // Drag and drop (basic)
+        document.addEventListener('dragover', e => { e.preventDefault(); document.getElementById('drop-zone').style.display = 'block'; });
+        document.addEventListener('dragleave', e => { if (e.target.id === 'drop-zone') document.getElementById('drop-zone').style.display = 'none'; });
+        document.addEventListener('drop', e => {
+            e.preventDefault();
+            document.getElementById('drop-zone').style.display = 'none';
+            // TODO: implement actual file upload from drag
+        });
+
+        // Utilities
+        function joinPath(base, name) {
+            if (base.endsWith('/')) return base + name;
+            return base + '/' + name;
+        }
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+            if (bytes < 1024*1024*1024) return (bytes/1024/1024).toFixed(1) + ' MB';
+            return (bytes/1024/1024/1024).toFixed(1) + ' GB';
+        }
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
