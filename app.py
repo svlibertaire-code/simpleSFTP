@@ -434,6 +434,22 @@ def delete_profile(profile_id):
     return jsonify({'error': 'Profile not found'}), 404
 
 
+@app.route('/connection/status', methods=['GET'])
+@require_login
+def connection_status():
+    """Check if there's an active SFTP connection for this session."""
+    session_id = session.get('session_id')
+    conn = connections.get(session_id)
+    if conn:
+        return jsonify({
+            'connected': True,
+            'host': conn['host'],
+            'port': conn['port'],
+            'username': conn['username'],
+            'cwd': conn['cwd']
+        })
+    return jsonify({'connected': False})
+
 @app.route('/api/profiles/<int:profile_id>/connect', methods=['POST'])
 @require_login
 def connect_from_profile(profile_id):
