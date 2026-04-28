@@ -149,19 +149,15 @@
 <body>
     <header>
         <h1>📁 simpleSFTP</h1>
-        <span id="user-info" style="color:#aaa; font-size:0.8rem;"></span>
-        <button onclick="logout()" style="width:auto; padding:6px 12px; font-size:0.8rem;">Logout</button>
-        <a href="/profiles">Connection Profiles</a>
-        <form id="connection-form">
-            <input type="text" id="host" placeholder="Host" required>
-            <input type="number" id="port" placeholder="22" value="22" style="width:60px">
-            <input type="text" id="username" placeholder="Username" required>
-            <input type="password" id="password" placeholder="Password (or leave blank for key)">
-            <input type="text" id="keyfile" placeholder="Key file path (optional)" style="width:180px">
-            <button type="submit" id="connect-btn">Connect</button>
-            <button type="button" id="disconnect-btn" class="hidden">Disconnect</button>
-        </form>
-        <span id="status">Disconnected</span>
+        <div style="display:flex; gap:12px; align-items:center;">
+            <span id="user-info" style="color:#aaa; font-size:0.8rem;"></span>
+            <a href="/profiles" style="color:#e94560; text-decoration:none; font-size:0.85rem; font-weight:600;">🔗 Connection Profiles</a>
+            <button onclick="logout()" style="width:auto; padding:6px 12px; font-size:0.8rem;">Logout</button>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+            <span id="status">Disconnected</span>
+            <button type="button" id="disconnect-btn" class="hidden" onclick="disconnect()">Disconnect</button>
+        </div>
     </header>
 
     <main>
@@ -241,48 +237,15 @@
             window.location = '/login';
         }
 
-        // Connection
-        document.getElementById('connection-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('connect-btn');
-            btn.disabled = true;
-            btn.textContent = 'Connecting...';
-
-            const res = await fetch('/connect', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    host: document.getElementById('host').value,
-                    port: parseInt(document.getElementById('port').value),
-                    username: document.getElementById('username').value,
-                    password: document.getElementById('password').value,
-                    key_filename: document.getElementById('keyfile').value || undefined
-                })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                connected = true;
-                document.getElementById('status').textContent = `Connected to ${data.message.split(' ')[2]}`;
-                document.getElementById('connect-btn').classList.add('hidden');
-                document.getElementById('disconnect-btn').classList.remove('hidden');
-                loadRemoteList('/');
-            } else {
-                alert('Connection failed: ' + (data.error || 'Unknown error'));
-            }
-            btn.disabled = false;
-            btn.textContent = 'Connect';
-        });
-
-        document.getElementById('disconnect-btn').addEventListener('click', async () => {
+        // Disconnect handler
+        async function disconnect() {
             await fetch('/disconnect', {method: 'POST'});
             connected = false;
             document.getElementById('status').textContent = 'Disconnected';
-            document.getElementById('connect-btn').classList.remove('hidden');
             document.getElementById('disconnect-btn').classList.add('hidden');
             document.getElementById('remote-list').innerHTML = '';
             document.getElementById('remote-path').textContent = 'Not connected';
-        });
+        }
 
         // Local file listing
         async function loadLocalList(path) {
@@ -490,7 +453,6 @@
             if (data.connected) {
                 connected = true;
                 document.getElementById('status').textContent = `Connected to ${data.host}:${data.port}`;
-                document.getElementById('connect-btn').classList.add('hidden');
                 document.getElementById('disconnect-btn').classList.remove('hidden');
                 loadRemoteList(data.cwd || '/');
             }
