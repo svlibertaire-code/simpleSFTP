@@ -346,6 +346,77 @@ def create_profile():
         conn.close()
 
 
+@app.route('/api/profiles/<int:profile_id>', methods=['GET'])
+@require_login
+def get_profile(profile_id):
+    """Get a single profile (without decrypted credentials)."""
+    user_id = session['user_id']
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, name, host, port, username, key_filename, created_at
+        FROM saved_connections
+        WHERE id = ? AND user_id = ?
+    ''', (profile_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        return jsonify({'error': 'Profile not found'}), 404
+    
+    return jsonify({
+        'success': True,
+        'profile': {
+            'id': row[0],
+            'name': row[1],
+            'host': row[2],
+            'port': row[3],
+            'username': row[4],
+            'key_filename': row[5],
+            'created_at': row[6]
+        }
+    })
+
+
+@app.route('/api/profiles/<int:profile_id>', methods=['PUT'])
+@require_login
+def update_profile(profile_id):
+    """Update a connection profile with re-encrypted credentials."""
+    data = request.get_json() or request.form
+    user_id = session['user_id']
+    
+    name = data.get('name', '').strip()
+    host = data.get('host')
+    port = int(data.get('port', 22))
+    username = data.get('username')
+    password = data.get('password')
+    key_filename = data.get('key_filename')
+    
+    if not all([name, host, username]):
+        return jsonify({'error': 'Name, host, and username required'}), 400
+    
+    app_password = session.get('password')
+    if not app_password:
+        return jsonify({'error': 'Session expired. Please log in again.'}), 401
+    
+    encrypted_password = encrypt_data(password, app_password)
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        UPDATE saved_connections
+        SET name = ?, host = ?, port = ?, username = ?, encrypted_password = ?, key_filename = ?
+        WHERE id = ? AND user_id = ?
+    ''', (name, host, port, username, encrypted_password, key_filename, profile_id, user_id))
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+    
+    if updated:
+        return jsonify({'success': True, 'message': f'Profile "{name}" updated'})
+    return jsonify({'error': 'Profile not found'}), 404
+
+
 @app.route('/api/profiles/<int:profile_id>', methods=['DELETE'])
 @require_login
 def delete_profile(profile_id):

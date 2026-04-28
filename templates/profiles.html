@@ -89,6 +89,12 @@
         button.secondary:hover {
             background: #1a4a7a;
         }
+        button.cancel {
+            background: #444;
+        }
+        button.cancel:hover {
+            background: #555;
+        }
         .profile-list {
             background: #16213e;
             border-radius: 8px;
@@ -150,6 +156,7 @@
             color: #e94560;
             display: block;
         }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
@@ -163,7 +170,8 @@
         
         <div class="message" id="message"></div>
 
-        <div class="profile-form">
+        <!-- Add New Profile Form -->
+        <div class="profile-form" id="add-form">
             <h3 style="margin-bottom: 15px; font-size: 1rem;">Add New Profile</h3>
             <div class="form-row">
                 <div class="form-group">
@@ -196,6 +204,42 @@
             <button onclick="saveProfile()">Save Profile</button>
         </div>
 
+        <!-- Edit Profile Form (hidden by default) -->
+        <div class="profile-form hidden" id="edit-form">
+            <h3 style="margin-bottom: 15px; font-size: 1rem;">Edit Profile</h3>
+            <input type="hidden" id="edit-id">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit-name">Profile Name</label>
+                    <input type="text" id="edit-name">
+                </div>
+                <div class="form-group full">
+                    <label for="edit-host">Host</label>
+                    <input type="text" id="edit-host">
+                </div>
+                <div class="form-group" style="flex: 0.3;">
+                    <label for="edit-port">Port</label>
+                    <input type="number" id="edit-port" value="22">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit-username">Username</label>
+                    <input type="text" id="edit-username">
+                </div>
+                <div class="form-group">
+                    <label for="edit-password">Password (leave blank to keep unchanged)</label>
+                    <input type="password" id="edit-password" placeholder="Enter new password or leave blank">
+                </div>
+                <div class="form-group full">
+                    <label for="edit-key_filename">SSH Key Path (optional)</label>
+                    <input type="text" id="edit-key_filename">
+                </div>
+            </div>
+            <button onclick="updateProfile()">Update Profile</button>
+            <button class="cancel" onclick="cancelEdit()" style="margin-left: 8px;">Cancel</button>
+        </div>
+
         <h3 style="margin-bottom: 15px;">Saved Profiles</h3>
         <div class="profile-list" id="profile-list">
             <div class="empty-state">Loading profiles...</div>
@@ -203,6 +247,8 @@
     </div>
 
     <script>
+        let editingId = null;
+
         // Check auth
         async function checkAuth() {
             const res = await fetch('/auth/status');
@@ -241,6 +287,7 @@
                     </div>
                     <div class="profile-actions">
                         <button onclick="connectProfile(${p.id})">Connect</button>
+                        <button class="secondary" onclick="editProfile(${p.id})">Edit</button>
                         <button class="secondary" onclick="deleteProfile(${p.id})">Delete</button>
                     </div>
                 </div>
@@ -283,6 +330,72 @@
             }
         }
 
+        async function editProfile(id) {
+            editingId = id;
+            const res = await fetch(`/api/profiles/${id}`);
+            const data = await res.json();
+            
+            if (!data.success) {
+                showMessage(data.error || 'Failed to load profile', true);
+                return;
+            }
+            
+            const p = data.profile;
+            document.getElementById('edit-id').value = p.id;
+            document.getElementById('edit-name').value = p.name;
+            document.getElementById('edit-host').value = p.host;
+            document.getElementById('edit-port').value = p.port;
+            document.getElementById('edit-username').value = p.username;
+            document.getElementById('edit-password').value = '';
+            document.getElementById('edit-key_filename').value = p.key_filename || '';
+            
+            // Show edit form, hide add form
+            document.getElementById('edit-form').classList.remove('hidden');
+            document.getElementById('add-form').classList.add('hidden');
+            
+            // Scroll to edit form
+            document.getElementById('edit-form').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function cancelEdit() {
+            editingId = null;
+            document.getElementById('edit-form').classList.add('hidden');
+            document.getElementById('add-form').classList.remove('hidden');
+        }
+
+        async function updateProfile() {
+            if (!editingId) return;
+            
+            const body = {
+                name: document.getElementById('edit-name').value,
+                host: document.getElementById('edit-host').value,
+                port: parseInt(document.getElementById('edit-port').value),
+                username: document.getElementById('edit-username').value,
+                password: document.getElementById('edit-password').value,
+                key_filename: document.getElementById('edit-key_filename').value
+            };
+            
+            if (!body.name || !body.host || !body.username) {
+                showMessage('Name, host, and username are required', true);
+                return;
+            }
+            
+            const res = await fetch(`/api/profiles/${editingId}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                showMessage(data.message);
+                cancelEdit();
+                loadProfiles();
+            } else {
+                showMessage(data.error || 'Failed to update', true);
+            }
+        }
+
         async function connectProfile(id) {
             const res = await fetch(`/api/profiles/${id}/connect`, {
                 method: 'POST'
@@ -291,7 +404,6 @@
             
             if (data.success) {
                 showMessage(data.message);
-                // Redirect to main app after a moment
                 setTimeout(() => window.location = '/', 1500);
             } else {
                 showMessage(data.error || 'Connection failed', true);
