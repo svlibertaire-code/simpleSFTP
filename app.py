@@ -678,6 +678,23 @@ def remote_mkdir():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/remote/rename', methods=['POST'])
+@require_login
+@require_connection
+def remote_rename():
+    data = request.get_json() or request.form
+    old_path = data.get('old_path')
+    new_path = data.get('new_path')
+    if not old_path or not new_path:
+        return jsonify({'error': 'old_path and new_path required'}), 400
+    sftp = get_sftp_client(session.get('session_id'))
+    try:
+        sftp.rename(old_path, new_path)
+        return jsonify({'success': True, 'message': f'Renamed to {new_path}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ---- LOCAL FILE OPS ----
 
 @app.route('/local/list', methods=['POST'])
@@ -726,6 +743,53 @@ def local_upload():
     return jsonify({'success': True, 'message': f'Saved to {filepath}'})
 
 
+@app.route('/local/delete', methods=['POST'])
+@require_login
+def local_delete():
+    data = request.get_json() or request.form
+    path = data.get('path')
+    is_dir = data.get('is_dir', False)
+    if not path:
+        return jsonify({'error': 'path required'}), 400
+    try:
+        if is_dir:
+            os.rmdir(path)
+        else:
+            os.remove(path)
+        return jsonify({'success': True, 'message': f'Deleted {path}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/local/rename', methods=['POST'])
+@require_login
+def local_rename():
+    data = request.get_json() or request.form
+    old_path = data.get('old_path')
+    new_path = data.get('new_path')
+    if not old_path or not new_path:
+        return jsonify({'error': 'old_path and new_path required'}), 400
+    try:
+        os.rename(old_path, new_path)
+        return jsonify({'success': True, 'message': f'Renamed to {new_path}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/local/mkdir', methods=['POST'])
+@require_login
+def local_mkdir():
+    data = request.get_json() or request.form
+    path = data.get('path')
+    if not path:
+        return jsonify({'error': 'path required'}), 400
+    try:
+        os.mkdir(path)
+        return jsonify({'success': True, 'message': f'Created {path}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ---- ADMIN / AUDIT ----
 
 @app.route('/admin/login-log')
@@ -763,4 +827,6 @@ def login_log():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # Bind to Tailscale IP only for security
+    TAILSCALE_IP = '100.90.68.31'
+    app.run(host=TAILSCALE_IP, port=5001, debug=True)

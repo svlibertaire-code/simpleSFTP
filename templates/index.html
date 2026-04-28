@@ -177,6 +177,7 @@
             <div class="actions">
                 <button onclick="localUp()">⬆ Up</button>
                 <button onclick="showMkdir('local')">📁 New Folder</button>
+                <button onclick="showRename('local')">✏️ Rename</button>
                 <button onclick="triggerLocalUpload()">⬆ Upload</button>
                 <button onclick="downloadSelectedLocal()">⬇ Download</button>
                 <button onclick="deleteSelected('local')">🗑 Delete</button>
@@ -197,6 +198,7 @@
             <div class="actions">
                 <button onclick="remoteUp()">⬆ Up</button>
                 <button onclick="showMkdir('remote')">📁 New Folder</button>
+                <button onclick="showRename('remote')">✏️ Rename</button>
                 <button onclick="transferToLocal()">⬅ To Local</button>
                 <button onclick="transferToRemote()">➡ To Remote</button>
                 <button onclick="deleteSelected('remote')">🗑 Delete</button>
@@ -214,6 +216,18 @@
             <div class="modal-buttons">
                 <button onclick="closeModal()">Cancel</button>
                 <button onclick="doMkdir()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Modal -->
+    <div class="modal-overlay" id="rename-modal">
+        <div class="modal">
+            <h3>Rename</h3>
+            <input type="text" id="rename-name" placeholder="new_name">
+            <div class="modal-buttons">
+                <button onclick="closeRenameModal()">Cancel</button>
+                <button onclick="doRename()">Rename</button>
             </div>
         </div>
     </div>
@@ -299,11 +313,13 @@
             renderFileList('remote-list', data.files, 'remote');
         }
 
-        let showHidden = false;
+        let showHiddenLocal = false;
+        let showHiddenRemote = false;
 
         function renderFileList(elementId, files, type) {
             const container = document.getElementById(elementId);
             container.innerHTML = '';
+            const showHidden = type === 'local' ? showHiddenLocal : showHiddenRemote;
             files.forEach(f => {
                 if (!showHidden && f.name.startsWith('.')) return;
                 const div = document.createElement('div');
@@ -384,8 +400,15 @@
             if (!confirm(`Delete ${selected.name}?`)) return;
 
             if (type === 'local') {
-                // Local delete via fetch (not implemented in backend yet, add if needed)
-                alert('Local delete not yet implemented in this scaffold');
+                const path = joinPath(localPath, selected.name);
+                const res = await fetch('/local/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: path, is_dir: selected.isDir})
+                });
+                const data = await res.json();
+                if (data.success) { loadLocalList(localPath); }
+                else alert('Error: ' + data.error);
             } else {
                 const remoteFile = joinPath(remotePath, selected.name);
                 const res = await fetch('/remote/delete', {
@@ -397,6 +420,51 @@
                 if (data.success) { loadRemoteList(remotePath); }
                 else alert('Error: ' + data.error);
             }
+        }
+
+        // Rename
+        let renameTarget = null;
+        function showRename(target) {
+            const selected = target === 'local' ? selectedLocal : selectedRemote;
+            if (!selected) { alert('Select a file first'); return; }
+            renameTarget = target;
+            document.getElementById('rename-name').value = selected.name;
+            document.getElementById('rename-modal').classList.add('active');
+            document.getElementById('rename-name').focus();
+        }
+        function closeRenameModal() {
+            document.getElementById('rename-modal').classList.remove('active');
+            document.getElementById('rename-name').value = '';
+        }
+        async function doRename() {
+            const newName = document.getElementById('rename-name').value;
+            if (!newName) return;
+            const selected = renameTarget === 'local' ? selectedLocal : selectedRemote;
+            if (!selected) return;
+            if (renameTarget === 'local') {
+                const oldPath = joinPath(localPath, selected.name);
+                const newPath = joinPath(localPath, newName);
+                const res = await fetch('/local/rename', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({old_path: oldPath, new_path: newPath})
+                });
+                const data = await res.json();
+                if (data.success) loadLocalList(localPath);
+                else alert(data.error);
+            } else {
+                const oldPath = joinPath(remotePath, selected.name);
+                const newPath = joinPath(remotePath, newName);
+                const res = await fetch('/remote/rename', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({old_path: oldPath, new_path: newPath})
+                });
+                const data = await res.json();
+                if (data.success) loadRemoteList(remotePath);
+                else alert(data.error);
+            }
+            closeRenameModal();
         }
 
         // Mkdir
@@ -424,8 +492,14 @@
                 else alert(data.error);
             } else {
                 const path = joinPath(localPath, name);
-                // Local mkdir not implemented in backend yet
-                alert('Local mkdir not yet implemented');
+                const res = await fetch('/local/mkdir', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: path})
+                });
+                const data = await res.json();
+                if (data.success) loadLocalList(localPath);
+                else alert(data.error);
             }
             closeModal();
         }
@@ -461,10 +535,8 @@
 
         // Toggle hidden files visibility
         function toggleHidden() {
-            showHidden = document.getElementById('show-hidden-local').checked || document.getElementById('show-hidden-remote').checked;
-            // Sync both checkboxes
-            document.getElementById('show-hidden-local').checked = showHidden;
-            document.getElementById('show-hidden-remote').checked = showHidden;
+            showHiddenLocal = document.getElementById('show-hidden-local').checked;
+            showHiddenRemote = document.getElementById('show-hidden-remote').checked;
             // Reload both lists
             loadLocalList(localPath);
             if (connected) loadRemoteList(remotePath);
