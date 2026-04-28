@@ -66,6 +66,8 @@
             align-items: center;
             justify-content: space-between;
             border-bottom: 1px solid #0f3460;
+            flex-wrap: wrap;
+            gap: 5px;
         }
         .pane-title { font-weight: 600; font-size: 0.9rem; }
         .breadcrumb {
@@ -166,6 +168,10 @@
             <div class="pane-header">
                 <span class="pane-title">💻 Local</span>
                 <span class="breadcrumb" id="local-path">/</span>
+                <label class="toggle-hidden" style="display:flex; align-items:center; gap:5px; font-size:0.75rem; color:#aaa; cursor:pointer;">
+                    <input type="checkbox" id="show-hidden-local" onchange="toggleHidden()" style="width:auto;">
+                    Show hidden
+                </label>
             </div>
             <div class="file-list" id="local-list"></div>
             <div class="actions">
@@ -182,6 +188,10 @@
             <div class="pane-header">
                 <span class="pane-title">🌐 Remote (SFTP)</span>
                 <span class="breadcrumb" id="remote-path">Not connected</span>
+                <label class="toggle-hidden" style="display:flex; align-items:center; gap:5px; font-size:0.75rem; color:#aaa; cursor:pointer;">
+                    <input type="checkbox" id="show-hidden-remote" onchange="toggleHidden()" style="width:auto;">
+                    Show hidden
+                </label>
             </div>
             <div class="file-list" id="remote-list"></div>
             <div class="actions">
@@ -289,10 +299,13 @@
             renderFileList('remote-list', data.files, 'remote');
         }
 
+        let showHidden = false;
+
         function renderFileList(elementId, files, type) {
             const container = document.getElementById(elementId);
             container.innerHTML = '';
             files.forEach(f => {
+                if (!showHidden && f.name.startsWith('.')) return;
                 const div = document.createElement('div');
                 div.className = 'file-item';
                 div.dataset.name = f.name;
@@ -445,6 +458,17 @@
             document.getElementById('drop-zone').style.display = 'none';
             // TODO: implement actual file upload from drag
         });
+
+        // Toggle hidden files visibility
+        function toggleHidden() {
+            showHidden = document.getElementById('show-hidden-local').checked || document.getElementById('show-hidden-remote').checked;
+            // Sync both checkboxes
+            document.getElementById('show-hidden-local').checked = showHidden;
+            document.getElementById('show-hidden-remote').checked = showHidden;
+            // Reload both lists
+            loadLocalList(localPath);
+            if (connected) loadRemoteList(remotePath);
+        }
 
         // Check if already connected (e.g., from profile page)
         async function checkExistingConnection() {
