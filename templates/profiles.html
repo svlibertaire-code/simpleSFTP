@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>simpleSFTP - Connection Profiles</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        header {
+            background: #16213e;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0f3460;
+        }
+        header h1 { font-size: 1.2rem; color: #e94560; }
+        header a {
+            color: #aaa;
+            text-decoration: none;
+            font-size: 0.85rem;
+        }
+        header a:hover { color: #e94560; }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+        h2 {
+            margin-bottom: 20px;
+            font-size: 1.3rem;
+        }
+        .profile-form {
+            background: #16213e;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .form-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            flex: 1;
+        }
+        .form-group.full {
+            flex: 2;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #0f3460;
+            background: #0f3460;
+            color: #eee;
+            font-size: 0.9rem;
+        }
+        input:focus {
+            outline: none;
+            border-color: #e94560;
+        }
+        button {
+            padding: 10px 20px;
+            border-radius: 4px;
+            border: none;
+            background: #e94560;
+            color: white;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button:hover { background: #ff6b6b; }
+        button.secondary {
+            background: #0f3460;
+        }
+        button.secondary:hover {
+            background: #1a4a7a;
+        }
+        .profile-list {
+            background: #16213e;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .profile-item {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid #0f3460;
+            gap: 15px;
+        }
+        .profile-item:last-child {
+            border-bottom: none;
+        }
+        .profile-item:hover {
+            background: #0f346033;
+        }
+        .profile-info {
+            flex: 1;
+        }
+        .profile-name {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 3px;
+        }
+        .profile-details {
+            font-size: 0.8rem;
+            color: #888;
+        }
+        .profile-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .profile-actions button {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .message {
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: none;
+        }
+        .message.success {
+            background: #00aa0033;
+            border: 1px solid #00aa00;
+            color: #00aa00;
+            display: block;
+        }
+        .message.error {
+            background: #e9456033;
+            border: 1px solid #e94560;
+            color: #e94560;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📁 simpleSFTP</h1>
+        <a href="/">← Back to File Manager</a>
+    </header>
+
+    <div class="container">
+        <h2>Connection Profiles</h2>
+        
+        <div class="message" id="message"></div>
+
+        <div class="profile-form">
+            <h3 style="margin-bottom: 15px; font-size: 1rem;">Add New Profile</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Profile Name</label>
+                    <input type="text" id="name" placeholder="My VPS">
+                </div>
+                <div class="form-group full">
+                    <label for="host">Host</label>
+                    <input type="text" id="host" placeholder="example.com">
+                </div>
+                <div class="form-group" style="flex: 0.3;">
+                    <label for="port">Port</label>
+                    <input type="number" id="port" value="22">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" placeholder="root">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password (optional)</label>
+                    <input type="password" id="password" placeholder="Leave blank for key auth">
+                </div>
+                <div class="form-group full">
+                    <label for="key_filename">SSH Key Path (optional)</label>
+                    <input type="text" id="key_filename" placeholder="/home/user/.ssh/id_rsa">
+                </div>
+            </div>
+            <button onclick="saveProfile()">Save Profile</button>
+        </div>
+
+        <h3 style="margin-bottom: 15px;">Saved Profiles</h3>
+        <div class="profile-list" id="profile-list">
+            <div class="empty-state">Loading profiles...</div>
+        </div>
+    </div>
+
+    <script>
+        // Check auth
+        async function checkAuth() {
+            const res = await fetch('/auth/status');
+            const data = await res.json();
+            if (!data.authenticated) {
+                window.location = '/login';
+            }
+        }
+        checkAuth();
+
+        function showMessage(text, isError = false) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = 'message ' + (isError ? 'error' : 'success');
+            setTimeout(() => el.className = 'message', 3000);
+        }
+
+        async function loadProfiles() {
+            const res = await fetch('/api/profiles');
+            const data = await res.json();
+            const container = document.getElementById('profile-list');
+            
+            if (!data.success || data.profiles.length === 0) {
+                container.innerHTML = '<div class="empty-state">No saved profiles yet. Create one above.</div>';
+                return;
+            }
+            
+            container.innerHTML = data.profiles.map(p => `
+                <div class="profile-item">
+                    <div class="profile-info">
+                        <div class="profile-name">${escapeHtml(p.name)}</div>
+                        <div class="profile-details">
+                            ${escapeHtml(p.username)}@${escapeHtml(p.host)}:${p.port}
+                            ${p.key_filename ? ' • Key auth' : ' • Password auth'}
+                        </div>
+                    </div>
+                    <div class="profile-actions">
+                        <button onclick="connectProfile(${p.id})">Connect</button>
+                        <button class="secondary" onclick="deleteProfile(${p.id})">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function saveProfile() {
+            const body = {
+                name: document.getElementById('name').value,
+                host: document.getElementById('host').value,
+                port: parseInt(document.getElementById('port').value),
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+                key_filename: document.getElementById('key_filename').value
+            };
+            
+            if (!body.name || !body.host || !body.username) {
+                showMessage('Name, host, and username are required', true);
+                return;
+            }
+            
+            const res = await fetch('/api/profiles', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                showMessage(data.message);
+                // Clear form
+                document.getElementById('name').value = '';
+                document.getElementById('host').value = '';
+                document.getElementById('username').value = '';
+                document.getElementById('password').value = '';
+                document.getElementById('key_filename').value = '';
+                loadProfiles();
+            } else {
+                showMessage(data.error || 'Failed to save', true);
+            }
+        }
+
+        async function connectProfile(id) {
+            const res = await fetch(`/api/profiles/${id}/connect`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                showMessage(data.message);
+                // Redirect to main app after a moment
+                setTimeout(() => window.location = '/', 1500);
+            } else {
+                showMessage(data.error || 'Connection failed', true);
+            }
+        }
+
+        async function deleteProfile(id) {
+            if (!confirm('Delete this profile?')) return;
+            
+            const res = await fetch(`/api/profiles/${id}`, {
+                method: 'DELETE'
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                showMessage('Profile deleted');
+                loadProfiles();
+            } else {
+                showMessage(data.error || 'Failed to delete', true);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load on startup
+        loadProfiles();
+    </script>
+</body>
+</html>

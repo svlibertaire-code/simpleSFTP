@@ -183,12 +183,12 @@ def login():
     if row and bcrypt.check_password_hash(row[1], password):
         session['user_id'] = row[0]
         session['username'] = username
+        session['password'] = password  # Store plaintext temporarily for credential encryption
         session.permanent = remember
         log_auth(username, True, 'login', user_id=row[0])
         
         resp = make_response(jsonify({'success': True, 'redirect': '/'}))
         if remember:
-            # Set a persistent signed cookie for "remember me"
             token = secrets.token_urlsafe(32)
             resp.set_cookie('remember_token', token, max_age=30*24*60*60, httponly=True, samesite='Lax')
         return resp
@@ -263,7 +263,169 @@ def index():
     return render_template('index.html')
 
 
-# ---- SFTP CONNECTION (now requires login) ----
+# ---- CONNECTION PROFILES PAGE ----
+
+@app.route('/profiles')
+def profiles_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    return render_template('profiles.html')
+
+
+@app.route('/api/profiles', methods=['GET'])
+@require_login
+def list_profiles():
+    """List saved connection profiles for current user."""
+    user_id = session['user_id']
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, name, host, port, username, key_filename, created_at
+        FROM saved_connections
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+    ''', (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'profiles': [
+            {
+                'id': r[0],
+                'name': r[1],
+                'host': r[2],
+                'port': r[3],
+                'username': r[4],
+                'key_filename': r[5],
+                'created_at': r[6]
+            }
+            for r in rows
+        ]
+    })
+
+
+@app.route('/api/profiles', methods=['POST'])
+@require_login
+def create_profile():
+    """Save a new connection profile with encrypted credentials."""
+    data = request.get_json() or request.form
+    user_id = session['user_id']
+    
+    name = data.get('name', '').strip()
+    host = data.get('host')
+    port = int(data.get('port', 22))
+    username = data.get('username')
+    password = data.get('password')
+    key_filename = data.get('key_filename')
+    
+    if not all([name, host, username]):
+        return jsonify({'error': 'Name, host, and username required'}), 400
+    
+    # Encrypt credentials with user's app password
+    app_password = session.get('password')
+    if not app_password:
+        return jsonify({'error': 'Session expired. Please log in again.'}), 401
+    
+    encrypted_password = encrypt_data(password, app_password)
+    encrypted_key_data = None  # For future: upload key file content
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    try:
+        c.execute('''
+            INSERT INTO saved_connections (user_id, name, host, port, username, encrypted_password, encrypted_key_data, key_filename)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, name, host, port, username, encrypted_password, encrypted_key_data, key_filename))
+        profile_id = c.lastrowid
+        conn.commit()
+        return jsonify({'success': True, 'id': profile_id, 'message': f'Profile "{name}" saved'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/api/profiles/<int:profile_id>', methods=['DELETE'])
+@require_login
+def delete_profile(profile_id):
+    """Delete a connection profile."""
+    user_id = session['user_id']
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM saved_connections WHERE id = ? AND user_id = ?', (profile_id, user_id))
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+    
+    if deleted:
+        return jsonify({'success': True, 'message': 'Profile deleted'})
+    return jsonify({'error': 'Profile not found'}), 404
+
+
+@app.route('/api/profiles/<int:profile_id>/connect', methods=['POST'])
+@require_login
+def connect_from_profile(profile_id):
+    """Connect using a saved profile — decrypts credentials on the fly."""
+    user_id = session['user_id']
+    app_password = session.get('password')
+    if not app_password:
+        return jsonify({'error': 'Session expired. Please log in again.'}), 401
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        SELECT name, host, port, username, encrypted_password, key_filename
+        FROM saved_connections
+        WHERE id = ? AND user_id = ?
+    ''', (profile_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        return jsonify({'error': 'Profile not found'}), 404
+    
+    name, host, port, username, encrypted_password, key_filename = row
+    password = decrypt_data(encrypted_password, app_password)
+    
+    # Now connect with decrypted credentials
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(
+            hostname=host,
+            port=port,
+            username=username,
+            password=password,
+            key_filename=key_filename,
+            timeout=10,
+            look_for_keys=True
+        )
+        sftp = ssh.open_sftp()
+        
+        session_id = os.urandom(16).hex()
+        session['session_id'] = session_id
+        connections[session_id] = {
+            'ssh': ssh,
+            'sftp': sftp,
+            'host': host,
+            'port': port,
+            'username': username,
+            'password': password,
+            'key_filename': key_filename,
+            'cwd': '/'
+        }
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'message': f'Connected to {host}:{port} as {username} (via profile "{name}")'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ---- SFTP CONNECTION (manual) ----
 
 @app.route('/connect', methods=['POST'])
 @require_login
@@ -274,7 +436,6 @@ def connect():
     username = data.get('username')
     password = data.get('password')
     key_filename = data.get('key_filename')
-    save_name = data.get('save_name')  # Optional: save this connection
     
     if not all([host, username]) or (not password and not key_filename):
         return jsonify({'error': 'Host, username, and either password or key file required'}), 400
@@ -305,12 +466,6 @@ def connect():
             'key_filename': key_filename,
             'cwd': '/'
         }
-        
-        # Save connection if requested
-        if save_name:
-            user_password = session.get('password')  # We don't store this... need another approach
-            # For now, skip saving encrypted credentials - requires user's app password
-            pass
         
         return jsonify({
             'success': True,
@@ -489,12 +644,11 @@ def local_upload():
 @app.route('/admin/login-log')
 @require_login
 def login_log():
-    """Return login audit log for the current user (or all for admin)."""
+    """Return login audit log for the current user."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     user_id = session.get('user_id')
     
-    # For now, show user's own log
     c.execute('''
         SELECT username, action, success, ip_address, timestamp, details
         FROM login_log
